@@ -1,4 +1,15 @@
-enum ProjectSatus {
+interface Draggable {
+  daragStartHandler(event: DragEvent): void;
+  dragEndHandler(event: DragEvent): void;
+}
+
+interface DraggaTarget {
+  dragOverHandler(event: DragEvent): void;
+  dragHandler(event: DragEvent): void;
+  dragLeaveHandler(event: DragEvent): void;
+}
+
+enum ProjectStatus {
   Active,
   Finished,
 }
@@ -9,7 +20,7 @@ class Project {
     public title: string,
     public description: string,
     public people: number,
-    public status: ProjectSatus
+    public status: ProjectStatus
   ) {}
 }
 
@@ -17,7 +28,7 @@ type Listener = (items: Project[]) => void;
 
 class ProjectState {
   private listeners: Listener[] = [];
-  private projects: any[] = [];
+  private projects: Project[] = [];
   private static instance: ProjectState;
 
   private constructor() {}
@@ -40,9 +51,21 @@ class ProjectState {
       title,
       description,
       newPoeple,
-      ProjectSatus.Active
+      ProjectStatus.Active
     );
     this.projects.push(newProject);
+    this.updateListeners();
+  }
+
+  moveProject(projectId: string, newStaus: ProjectStatus) {
+    const project = this.projects.find((prj) => prj.id === projectId);
+    if (project && project.status !== newStaus) {
+      project.status = newStaus;
+      this.updateListeners();
+    }
+  }
+
+  private updateListeners() {
     for (const listenerFn of this.listeners) {
       listenerFn(this.projects.slice());
     }
@@ -142,7 +165,10 @@ abstract class Component<T extends HTMLElement, U extends HTMLElement> {
   abstract renderContent(): void;
 }
 
-class ProjectItem extends Component<HTMLUListElement, HTMLElement> {
+class ProjectItem
+  extends Component<HTMLUListElement, HTMLElement>
+  implements Draggable
+{
   private project: Project;
 
   get persons() {
@@ -156,10 +182,24 @@ class ProjectItem extends Component<HTMLUListElement, HTMLElement> {
   constructor(hostId: string, project: Project) {
     super("single-project", hostId, false, project.id);
     this.project = project;
+    this.configure();
     this.renderContent();
   }
 
-  configure() {}
+  @autobind
+  daragStartHandler(event: DragEvent): void {
+    event.dataTransfer!.setData("text/plain", this.project.id);
+    event.dataTransfer!.effectAllowed = "move";
+  }
+
+  dragEndHandler(_: DragEvent): void {
+    console.log("drag end");
+  }
+
+  configure() {
+    this.element.addEventListener("dragstart", this.daragStartHandler);
+    this.element.addEventListener("dragend", this.dragEndHandler);
+  }
   renderContent() {
     this.element.querySelector("h2")!.textContent = this.project.title;
     this.element.querySelector("h3")!.textContent = this.persons + " assigned";
@@ -167,7 +207,10 @@ class ProjectItem extends Component<HTMLUListElement, HTMLElement> {
   }
 }
 
-class projectList extends Component<HTMLDivElement, HTMLElement> {
+class projectList
+  extends Component<HTMLDivElement, HTMLElement>
+  implements DraggaTarget
+{
   assignedProjects: Project[];
 
   constructor(private type: "active" | "finished") {
@@ -178,13 +221,41 @@ class projectList extends Component<HTMLDivElement, HTMLElement> {
     this.renderContent();
   }
 
+  @autobind
+  dragOverHandler(event: DragEvent): void {
+    if (event.dataTransfer && event.dataTransfer.types[0] === "text/plain") {
+      event.preventDefault();
+      const listEl = this.element.querySelector("ul")!;
+      listEl.classList.add("droppable");
+    }
+  }
+
+  @autobind
+  dragHandler(event: DragEvent) {
+    const prjId = event.dataTransfer!.getData("text/plain");
+    projectState.moveProject(
+      prjId,
+      this.type === "active" ? ProjectStatus.Active : ProjectStatus.Finished
+    );
+  }
+
+  @autobind
+  dragLeaveHandler(_: DragEvent): void {
+    const listEl = this.element.querySelector("ul")!;
+    listEl.classList.remove("droppable");
+  }
+
   configure() {
+    this.element.addEventListener("dragover", this.dragOverHandler);
+    this.element.addEventListener("dragleave", this.dragLeaveHandler);
+    this.element.addEventListener("drop", this.dragHandler);
+
     projectState.addListener((projects: Project[]) => {
       const releventProject = projects.filter((prj) => {
         if (this.type === "active") {
-          return prj.status === ProjectSatus.Active;
+          return prj.status === ProjectStatus.Active;
         }
-        return prj.status === ProjectSatus.Finished;
+        return prj.status === ProjectStatus.Finished;
       });
       this.assignedProjects = releventProject;
       this.renderProjects();
